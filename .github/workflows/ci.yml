@@ -1,0 +1,77 @@
+name: Pipeline CI/CD ImprimRési
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  qualite:
+    name: 1. Qualité du code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+      - name: Vérifier la qualité du code
+        run: ruff check .
+
+  tests:
+    name: 2. Tests automatiques
+    needs: qualite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+      - name: Lancer les tests
+        run: pytest -v
+
+  docker:
+    name: 3. Build et test du conteneur
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+      - name: Construire l'image Docker
+        run: docker build -t imprimresi .
+      - name: Démarrer le conteneur
+        run: docker run -d -p 5000:5000 --name app imprimresi
+      - name: Vérifier que le site répond
+        run: |
+          sleep 5
+          curl --fail http://localhost:5000/
+          curl --fail http://localhost:5000/accueil
+
+  publication:
+    name: 4. Publication de l'image
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+      - name: Nom de l'image en minuscules
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - name: Connexion au registre GitHub
+        run: >
+          echo "${{ secrets.GITHUB_TOKEN }}" |
+          docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Construire et publier l'image
+        run: |
+          docker build -t "$IMAGE:latest" .
+          docker push "$IMAGE:latest"
+        
